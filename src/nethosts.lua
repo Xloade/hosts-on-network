@@ -353,8 +353,8 @@ function ScanNetworkForHosts ( Subnet )
         -- It was NOT the first line of a host record -- which is OK.
         -- But now it's required to be the first line of the entire
         -- report.  Either match text from that line or throw an error.
-        if not line:match( "Starting Nmap" ) then
-            error( "Could not detect start of 'nmap' scan!" )
+        if not line:match( "Starting Nmap .+" ) and not line:match( "Nmap done.+" ) then
+            error( "Could not detect start or end of 'nmap' scan!"..line )
         end
 
         -- If we do match the first line of the report, continue using
