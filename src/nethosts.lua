@@ -13,6 +13,7 @@
 -------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
 --
+Json = require 'lunajson'
 -- Read in the local network's database of known hosts as a sequence (array).
 local NetworkDatabase = require "mac-addresses"
     -- Contains two tables of network objects:
@@ -755,6 +756,7 @@ function main ( Database )
     -- Sort the known hosts database into an assoc array keyed by MAC address.
     DatabaseOfHostsByMAC = sortHostsByMACaddress( Database.KnownHosts )
 
+    local objecttoconvert = {}
     -- Now process each subnet in the list of subnets.
     for _, Subnet in ipairs( Database.Subnets ) do
 
@@ -766,8 +768,20 @@ function main ( Database )
             sortHostsByFamiliarity( AllDiscoveredHosts )
 
         -- Generate a report of what we found.
-        genNetworkHostsReport( Subnet, HostsThatAreKnown, HostsThatAreUnknown )
+        -- genNetworkHostsReport( Subnet, HostsThatAreKnown, HostsThatAreUnknown )
+
+        -- generate json
+        local KnownHostsJson = {}
+        local UnknownHostsJson = {}
+        for _, NetworkHosts in ipairs( HostsThatAreKnown ) do
+            table.insert(KnownHostsJson, {["ip"] = NetworkHosts.ipNumber, ["mac"] = NetworkHosts.macAddr, ["discription"] = NetworkHosts.description})
+        end
+        for _, NetworkHosts in ipairs( HostsThatAreUnknown ) do
+            table.insert(UnknownHostsJson, {["ip"] = NetworkHosts.ipNumber, ["mac"] = NetworkHosts.macAddr, ["discription"] = NetworkHosts.description})
+        end
+        table.insert(objecttoconvert, {["discription"] = Subnet.description, ["subnet"] = Subnet.ipv4subnet,["hosts"] = {["known hosts"] = KnownHostsJson, ["unknown hosts"] = UnknownHostsJson}})
     end
+    print(Json.encode( objecttoconvert ))
 end
 
 
