@@ -7,3 +7,9 @@ table.insert(objecttoconvert["object one"], "bar")
 local result = Json.encode( objecttoconvert )
 print("print result !!")
 print( result )
+
+local line = "22/tcp open  ssh"
+
+local ping, f ,f = line:match( "(%d+%/%w+)%s+(.+)%s+(%w+)" )
+-- local ping, f, f = line:match( "(%d+%/%w+)" )
+print(ping)

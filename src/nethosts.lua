@@ -316,7 +316,7 @@ function ScanNetworkForHosts ( Subnet )
     -- Use the subnet (string) to form a shell command to carry out
     -- the scan.  We'll use 'nmap' with a simple ping test.
     -- This can be made more complex/thorough, if desired.
-    local shellCommand = "nmap -n -sP "..thisSubnet
+    local shellCommand = "nmap -O -n -sS --osscan-guess "..thisSubnet
 
     -- Define results handler functions for parsing the lines of the
     -- results file.  The 'nmap' report consists of a header line,
@@ -334,6 +334,7 @@ function ScanNetworkForHosts ( Subnet )
     local resultHandlerInitial
     local resultHandlerMiddle
     local resultHandlerFinal
+    local resultHandlerAditional
 
 
     resultHandlerInitial = function ( line )
@@ -354,14 +355,27 @@ function ScanNetworkForHosts ( Subnet )
         -- It was NOT the first line of a host record -- which is OK.
         -- But now it's required to be the first line of the entire
         -- report.  Either match text from that line or throw an error.
-        if not line:match( "Starting Nmap .+" ) then
-            error( "Could not detect start of 'nmap' scan!"..line )
+        if line:match( "Starting Nmap .+" ) then
+            return resultHandlerInitial
         end
+
+        -- But now it's required to be the last line of the entire
+        -- report.  Either match text from that line or throw an error.
+        if line:match( "OS detection performed.+" ) then
+            return resultHandlerInitial
+        end
+        -- But now it's required to be the last line of the entire
+        -- report.  Either match text from that line or throw an error.
+        if not line:match( "Nmap done.+" ) then
+            error( "Could not detect end of 'nmap' scan!\nLast line: "..line)
+        end
+
+        -- If it DID match the last line of the report, then we must
+        -- return nil (the default) to signal the output parser to stop.
 
         -- If we do match the first line of the report, continue using
         -- this same handler, since the very next line of the output
         -- should be a "Line 1" of the first host record.
-        return resultHandlerInitial
     end
 
 
@@ -379,12 +393,25 @@ function ScanNetworkForHosts ( Subnet )
         AllDiscoveredHosts[ #AllDiscoveredHosts ].status = status
 
         -- Update the handler to parse the 3rd line of the record.
-        return resultHandlerFinal
+        return resultHandlerAditional
     end
 
+    resultHandlerAditional = function (line)
+        -- first one or two lines
+        local pingHeader = line:match( ".*([pP][oO][rR][tT]).*" )
+        if pingHeader then
+            return resultHandlerAditional
+        end
 
-    resultHandlerFinal = function ( line )
-        -- Attempt to match the 3rd of 3 lines returned for each host.
+        local port, state, service = line:match("(%d+%/%w+)%s+(.+)%s+(%w+)")
+        if port then
+            if AllDiscoveredHosts[ #AllDiscoveredHosts ].ports == nil then
+                AllDiscoveredHosts[ #AllDiscoveredHosts ].ports = {}
+            end
+            table.insert(AllDiscoveredHosts[ #AllDiscoveredHosts ].ports, {port, state, service})
+            return resultHandlerAditional
+        end
+
         local macAddr, vendor = line:match( "MAC Address: (%S+)%s+(.+)" )
 
         -- The above should have matched, so capture the MAC address and
@@ -395,26 +422,40 @@ function ScanNetworkForHosts ( Subnet )
             AllDiscoveredHosts[ #AllDiscoveredHosts ].vendor  = vendor
 
             -- Update the handler to parse the 1st line of the NEXT record.
+            return resultHandlerAditional
+        end
+
+        local OsNotFound = line:match("Too many fingerprints match this host to give specific OS details")
+        if OsNotFound then
+            AllDiscoveredHosts[ #AllDiscoveredHosts ].os = "Not found"
+            return resultHandlerAditional
+        end
+
+        local DeviceType = line:match("Device type: (.+)")
+        if DeviceType then
+            return resultHandlerAditional
+        end
+
+        local RunningOs = line:match("Running: (.+)")
+        if RunningOs then
+            return resultHandlerAditional
+        end
+
+        local OS_CPE = line:match("OS CPE: (.+)")
+        if OS_CPE then
+            return resultHandlerAditional
+        end
+
+        local OS_details = line:match("OS details: (.+)")
+        if OS_details then
+            AllDiscoveredHosts[ #AllDiscoveredHosts ].os = OS_details
+            return resultHandlerAditional
+        end
+
+        local Hop = line:match("Network Distance: (%d+) hop")
+        if Hop then
             return resultHandlerInitial
         end
-
-        -- It was NOT the last line of a host record -- which is OK...
-        -- as long as we found at least one host AND we read a MAC
-        -- address for that one host -- which will be the first host.
-        if AllDiscoveredHosts[1].ipNumber and
-            not AllDiscoveredHosts[1].macAddr then
-                error( "NMAP is not returning MAC addresses;"..
-                    " is 'sudo' working?" )
-        end
-
-        -- But now it's required to be the last line of the entire
-        -- report.  Either match text from that line or throw an error.
-        if not line:match( "Nmap done.+" ) then
-            error( "Could not detect end of 'nmap' scan!" )
-        end
-
-        -- If it DID match the last line of the report, then we must
-        -- return nil (the default) to signal the output parser to stop.
     end
 
     runShellCommand( shellCommand, resultHandlerInitial )
@@ -742,7 +783,17 @@ function genNetworkHostsReport ( Subnet,
     printHostReport( Subnet, HostsThatAreUnknown, isUnknownTag )
 end
 
-
+function insertHost(host)
+    local res = {["ip"] = host.ipNumber, ["mac"] = host.macAddr, ["discription"] = host.description, ["os"] = host.os}
+    if host.ports ~= nil then
+        local ports = {}
+        for _, port in ipairs( host.ports ) do
+            table.insert(ports, {["port"] = port[1], ["status"] = port[2], ["service"] = port[3]})
+        end
+        res["ports"] = ports
+    end
+    return res
+end
 -------------------------------------------------------------------------------
 -------------------------------------------------------------------------------
 --
@@ -773,11 +824,13 @@ function main ( Database )
         -- generate json
         local KnownHostsJson = {}
         local UnknownHostsJson = {}
+        -- known hosts
         for _, NetworkHosts in ipairs( HostsThatAreKnown ) do
-            table.insert(KnownHostsJson, {["ip"] = NetworkHosts.ipNumber, ["mac"] = NetworkHosts.macAddr, ["discription"] = NetworkHosts.description})
+            table.insert(KnownHostsJson, insertHost(NetworkHosts))
         end
+        -- unKnown hosts
         for _, NetworkHosts in ipairs( HostsThatAreUnknown ) do
-            table.insert(UnknownHostsJson, {["ip"] = NetworkHosts.ipNumber, ["mac"] = NetworkHosts.macAddr, ["discription"] = NetworkHosts.description})
+            table.insert(UnknownHostsJson, insertHost(NetworkHosts))
         end
         table.insert(objecttoconvert, {["discription"] = Subnet.description, ["subnet"] = Subnet.ipv4subnet,["hosts"] = {["known hosts"] = KnownHostsJson, ["unknown hosts"] = UnknownHostsJson}})
     end

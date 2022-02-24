@@ -18,12 +18,12 @@ NetworkDatabase.Subnets = {
 
 NetworkDatabase.KnownHosts = {
 
-    {   macAddr = "00:15:5D:AC:EB:AE",
-        description = "Windows side of WSL",
-    },
-    -- {   macAddr = "00:15:5D:D6:0F:87",
-    --     description = "Linux side of WSL",
+    -- {   macAddr = "00:15:5D:AC:EB:AE",
+    --     description = "Windows side of WSL",
     -- },
+    {   macAddr = "00:15:5D:D6:03:63",
+        description = "Linux side of WSL",
+    },
 }
 
 return NetworkDatabase
